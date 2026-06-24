@@ -16,6 +16,9 @@ jobs:
     name: Build .pkg macOS
     runs-on: macos-latest
     
+    permissions:
+      contents: write
+    
     env:
       VERSION: ${{ github.event.inputs.version || '1.0.7' }}
       OLLAMA_VERSION: '0.3.10'
