@@ -1,0 +1,267 @@
+name: Build macOS Installer (.pkg)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versione installer (es: 1.0.8)'
+        required: true
+        default: '1.0.7'
+
+jobs:
+  build-macos:
+    name: Build .pkg macOS
+    runs-on: macos-latest
+    
+    env:
+      VERSION: ${{ github.event.inputs.version || '1.0.7' }}
+      OLLAMA_VERSION: '0.3.10'
+      BUNDLE_ID: com.dottorionline.aura-desktop
+      PACKAGE_ID: com.dottorionline.aura-desktop-installer
+
+    steps:
+      # ── 1. Checkout ─────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Leggi versione da shared/VERSION ────────────────────
+      - name: Read version
+        id: version
+        run: |
+          if [ -f "shared/VERSION" ]; then
+            VER=$(cat shared/VERSION | tr -d '[:space:]')
+          else
+            VER="${{ env.VERSION }}"
+          fi
+          echo "version=$VER" >> $GITHUB_OUTPUT
+          echo "Building version: $VER"
+
+      # ── 3. Scarica ollama binary per macOS ─────────────────────
+      - name: Download ollama binary (macOS universal)
+        run: |
+          echo "Scaricando ollama per macOS..."
+          # Scarica versione universale (arm64 + amd64)
+          curl -L --retry 3 --retry-delay 5 \
+            "https://github.com/ollama/ollama/releases/download/v${{ env.OLLAMA_VERSION }}/ollama-darwin" \
+            -o ollama-binary
+          chmod +x ollama-binary
+          echo "✅ Ollama scaricato: $(file ollama-binary)"
+          ls -lh ollama-binary
+
+      # ── 4. Assembla payload del pkg ─────────────────────────────
+      - name: Assemble pkg payload
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          
+          # Struttura: payload/Applications/Aura.app/Contents/Resources/ollama-bundle/
+          mkdir -p payload/Applications/Aura.app/Contents/Resources/ollama-bundle
+          
+          # Copia ollama binary
+          cp ollama-binary payload/Applications/Aura.app/Contents/Resources/ollama-bundle/ollama
+          chmod +x payload/Applications/Aura.app/Contents/Resources/ollama-bundle/ollama
+          
+          # Copia plist LaunchAgent (template con __USER_HOME__ placeholder)
+          cp macos/resources/com.aura.ollama-serve.plist \
+             payload/Applications/Aura.app/Contents/Resources/ollama-bundle/
+          
+          # Copia setup script manuale
+          cp macos/scripts/setup-aura-ollama.sh \
+             payload/Applications/Aura.app/Contents/Resources/ollama-bundle/
+          chmod +x payload/Applications/Aura.app/Contents/Resources/ollama-bundle/setup-aura-ollama.sh
+          
+          # Copia Info.plist dell'app (minimale — l'installer non include il binario WKWebView)
+          mkdir -p payload/Applications/Aura.app/Contents/MacOS
+          cat > payload/Applications/Aura.app/Contents/Info.plist << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleIdentifier</key>
+              <string>com.dottorionline.aura-desktop</string>
+              <key>CFBundleName</key>
+              <string>Aura Desktop</string>
+              <key>CFBundleShortVersionString</key>
+              <string>VERSION_PLACEHOLDER</string>
+          </dict>
+          </plist>
+          EOF
+          
+          sed -i '' "s/VERSION_PLACEHOLDER/$VERSION/" payload/Applications/Aura.app/Contents/Info.plist
+          
+          echo "✅ Payload assemblato:"
+          find payload -type f | sort
+
+      # ── 5. Prepara scripts directory ────────────────────────────
+      - name: Prepare pkg scripts
+        run: |
+          mkdir -p pkg-scripts
+          cp macos/scripts/postinstall pkg-scripts/postinstall
+          chmod +x pkg-scripts/postinstall
+          echo "✅ Script postinstall pronto"
+
+      # ── 6. Build .pkg con pkgbuild ──────────────────────────────
+      - name: Build component package (pkgbuild)
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          
+          pkgbuild \
+            --root payload \
+            --scripts pkg-scripts \
+            --identifier "${{ env.PACKAGE_ID }}" \
+            --version "$VERSION" \
+            --install-location "/" \
+            --ownership preserve \
+            "Aura-Desktop-Installer-v${VERSION}-component.pkg"
+          
+          echo "✅ Component pkg creato:"
+          ls -lh "Aura-Desktop-Installer-v${VERSION}-component.pkg"
+
+      # ── 7. Crea Distribution.xml ────────────────────────────────
+      - name: Create Distribution.xml
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          cat > Distribution.xml << EOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <installer-gui-script minSpecVersion="1">
+              <title>AURA Desktop ${VERSION}</title>
+              <welcome file="welcome.html" mime-type="text/html"/>
+              <license file="license.html" mime-type="text/html"/>
+              <conclusion file="conclusion.html" mime-type="text/html"/>
+              <background file="background.png" scaling="proportional" alignment="bottomleft"/>
+              <options customize="never" require-scripts="false" hostArchitectures="x86_64,arm64"/>
+              <domains enable_localSystem="false" enable_userHome="true" enable_anywhere="true"/>
+              <volume-check>
+                  <allowed-os-versions>
+                      <os-version min="10.13"/>
+                  </allowed-os-versions>
+              </volume-check>
+              <pkg-ref id="${{ env.PACKAGE_ID }}"/>
+              <choices-outline>
+                  <line choice="default">
+                      <line choice="${{ env.PACKAGE_ID }}"/>
+                  </line>
+              </choices-outline>
+              <choice id="default"/>
+              <choice id="${{ env.PACKAGE_ID }}" visible="false">
+                  <pkg-ref id="${{ env.PACKAGE_ID }}"/>
+              </choice>
+              <pkg-ref id="${{ env.PACKAGE_ID }}" version="${VERSION}" onConclusion="none">Aura-Desktop-Installer-v${VERSION}-component.pkg</pkg-ref>
+          </installer-gui-script>
+          EOF
+
+      # ── 8. Crea assets HTML per il pkg ──────────────────────────
+      - name: Create pkg HTML assets
+        run: |
+          mkdir -p pkg-resources
+          
+          cat > pkg-resources/welcome.html << 'EOF'
+          <!DOCTYPE html><html><head><meta charset="UTF-8">
+          <style>body{font-family:-apple-system,sans-serif;padding:20px;color:#1a1a1a}
+          h1{color:#0F5665}p{line-height:1.6}ul{padding-left:20px}
+          .badge{background:#dcfce7;color:#15803d;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:700}</style>
+          </head><body>
+          <h1>Benvenuto in AURA Desktop</h1>
+          <p>Questo installer configura il motore AI locale <strong>Ollama</strong> per la piattaforma <strong>Dottori-Online</strong>.</p>
+          <ul>
+            <li>🔒 Tutto offline — nessun dato inviato via internet</li>
+            <li>🤖 Riconoscimento vocale con Llama locale</li>
+            <li>⚡ Avvio automatico con il tuo Mac</li>
+            <li>✅ CORS configurato per la dashboard medica</li>
+          </ul>
+          <p><span class="badge">v__VERSION__</span></p>
+          </body></html>
+          EOF
+          
+          cat > pkg-resources/license.html << 'EOF'
+          <!DOCTYPE html><html><head><meta charset="UTF-8">
+          <style>body{font-family:-apple-system,sans-serif;padding:20px;font-size:13px;color:#333}</style>
+          </head><body>
+          <h2>Termini di Utilizzo — AURA Desktop</h2>
+          <p>Software sviluppato da Dottori-Online per uso professionale medico.</p>
+          <p>Distribuito per uso interno. Ollama è distribuito sotto licenza MIT.</p>
+          <p>Per supporto: <a href="https://dottori-online.com">dottori-online.com</a></p>
+          </body></html>
+          EOF
+          
+          cat > pkg-resources/conclusion.html << 'EOF'
+          <!DOCTYPE html><html><head><meta charset="UTF-8">
+          <style>body{font-family:-apple-system,sans-serif;padding:20px}
+          .success{color:#15803d;font-size:18px;font-weight:700}
+          p{line-height:1.6;color:#374151}</style>
+          </head><body>
+          <p class="success">✅ Installazione completata!</p>
+          <p>Il motore AI locale Ollama è configurato e si avvierà automaticamente ad ogni login.</p>
+          <p><strong>Prossimi passi:</strong></p>
+          <ul>
+            <li>Apri <strong>AURA Desktop</strong></li>
+            <li>Verifica che "Ollama Local Engine" sia <strong>Attivo</strong></li>
+            <li>Se necessario, esegui il modello: <code>ollama pull qwen2.5:1.5b</code></li>
+          </ul>
+          </body></html>
+          EOF
+
+      # ── 9. Build finale .pkg con productbuild ──────────────────
+      - name: Build distribution package (productbuild)
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          
+          productbuild \
+            --distribution Distribution.xml \
+            --resources pkg-resources \
+            --package-path . \
+            "Aura-Desktop-Installer-v${VERSION}.pkg"
+          
+          echo "✅ Package finale creato:"
+          ls -lh "Aura-Desktop-Installer-v${VERSION}.pkg"
+          
+          # Verifica struttura
+          pkgutil --payload-files "Aura-Desktop-Installer-v${VERSION}.pkg" | head -20
+
+      # ── 10. Upload artifact ──────────────────────────────────────
+      - name: Upload .pkg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aura-desktop-macos-pkg-${{ steps.version.outputs.version }}
+          path: Aura-Desktop-Installer-v${{ steps.version.outputs.version }}.pkg
+          retention-days: 30
+
+      # ── 11. Crea GitHub Release ──────────────────────────────────
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "AURA Desktop v${{ steps.version.outputs.version }}"
+          body: |
+            ## AURA Desktop Installer v${{ steps.version.outputs.version }}
+            
+            ### macOS (.pkg — 1-Click Installer)
+            Installa automaticamente:
+            - **Ollama** bundlato nell'app
+            - **LaunchAgent** `com.aura.ollama-serve` con `OLLAMA_ORIGINS=*`
+            - Avvio automatico a ogni login
+            
+            ### Fix CORS incluso
+            Il post-install configura correttamente `OLLAMA_ORIGINS=*` per la dashboard medica AURA.
+            
+            ### Installazione
+            1. Scarica `Aura-Desktop-Installer-v${{ steps.version.outputs.version }}.pkg`
+            2. Apri il file (doppio click)
+            3. Segui il wizard — tutto automatico
+            
+            > **Note**: Il file non è firmato con Apple Developer ID. Se Gatekeeper blocca l'apertura:
+            > System Preferences → Privacy & Security → "Apri comunque"
+            
+            ### Modelli AI consigliati
+            ```bash
+            ollama pull qwen2.5:1.5b   # leggero, veloce
+            ollama pull llama3:latest  # più potente
+            ```
+          files: |
+            Aura-Desktop-Installer-v${{ steps.version.outputs.version }}.pkg
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

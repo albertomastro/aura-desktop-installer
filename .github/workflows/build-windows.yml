@@ -1,0 +1,338 @@
+name: Build Windows Installers (.exe + .msi)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versione installer (es: 1.0.8)'
+        required: true
+        default: '1.0.7'
+
+jobs:
+  build-windows:
+    name: Build .exe (NSIS) + .msi (WiX)
+    runs-on: windows-latest
+
+    env:
+      VERSION: ${{ github.event.inputs.version || '1.0.7' }}
+      OLLAMA_VERSION: '0.3.10'
+
+    steps:
+      # ── 1. Checkout ────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Leggi versione ──────────────────────────────────────
+      - name: Read version
+        id: version
+        shell: bash
+        run: |
+          if [ -f "shared/VERSION" ]; then
+            VER=$(cat shared/VERSION | tr -d '[:space:]')
+          else
+            VER="${{ env.VERSION }}"
+          fi
+          echo "version=$VER" >> $GITHUB_OUTPUT
+          echo "Building version: $VER"
+
+      # ── 3. Scarica ollama per Windows ─────────────────────────
+      - name: Download ollama binary (Windows)
+        shell: pwsh
+        run: |
+          $ollamaUrl = "https://github.com/ollama/ollama/releases/download/v${{ env.OLLAMA_VERSION }}/ollama-windows-amd64.zip"
+          Write-Host "Scaricando Ollama per Windows..."
+          Invoke-WebRequest -Uri $ollamaUrl -OutFile "ollama-windows.zip" -UseBasicParsing
+          Expand-Archive -Path "ollama-windows.zip" -DestinationPath "ollama-windows" -Force
+          Write-Host "✅ Ollama scaricato:"
+          Get-ChildItem ollama-windows | Select-Object Name, Length
+
+      # ── 4. Setup NSIS ─────────────────────────────────────────
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          # NSIS è pre-installato su windows-latest
+          $nsisPath = "C:\Program Files (x86)\NSIS\makensis.exe"
+          if (-not (Test-Path $nsisPath)) {
+              Write-Host "Installing NSIS via Chocolatey..."
+              choco install nsis -y --no-progress
+          }
+          & $nsisPath /VERSION
+          echo "NSIS_PATH=$nsisPath" >> $env:GITHUB_ENV
+
+      # ── 5. Prepara assets NSIS ────────────────────────────────
+      - name: Prepare NSIS assets
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          
+          # Crea directory assets
+          New-Item -ItemType Directory -Force -Path "windows\assets"
+          
+          # Crea LICENSE.txt
+          @"
+AURA Desktop - Termini di Utilizzo
+Dottori-Online - https://dottori-online.com
+
+Software sviluppato per uso professionale medico.
+Ollama e i modelli AI sono distribuiti sotto rispettive licenze open source.
+
+Per supporto: info@dottori-online.com
+"@ | Out-File -FilePath "windows\assets\LICENSE.txt" -Encoding UTF8
+          
+          # Crea icona placeholder se non esiste
+          if (-not (Test-Path "windows\assets\aura-icon.ico")) {
+              # Usa PowerShell per generare un'icona base da System
+              Add-Type -AssemblyName System.Drawing
+              $bmp = New-Object System.Drawing.Bitmap(32,32)
+              $g = [System.Drawing.Graphics]::FromImage($bmp)
+              $g.FillRectangle([System.Drawing.Brushes]::Teal, 0, 0, 32, 32)
+              $g.Dispose()
+              $icon = [System.Drawing.Icon]::FromHandle($bmp.GetHicon())
+              $fs = [System.IO.File]::Create("windows\assets\aura-icon.ico")
+              $icon.Save($fs)
+              $fs.Close()
+              $bmp.Dispose()
+              Write-Host "✅ Icona placeholder creata"
+          }
+          
+          Write-Host "✅ Assets preparati"
+
+      # ── 6. Assembla payload Windows ───────────────────────────
+      - name: Assemble Windows payload
+        shell: pwsh
+        run: |
+          # Crea directory payload
+          New-Item -ItemType Directory -Force -Path "windows\payload"
+          
+          # Copia ollama binary nella payload
+          Copy-Item "ollama-windows\ollama.exe" -Destination "windows\payload\ollama.exe"
+          
+          # Copia setup PowerShell
+          Copy-Item "windows\setup-ollama.ps1" -Destination "windows\payload\setup-ollama.ps1"
+          
+          # Crea un launcher batch per AURA Desktop (apre la web app)
+          @'
+@echo off
+REM AURA Desktop Launcher
+REM Apre la dashboard AURA Desktop nel browser predefinito
+start "" "https://dottori-online.com/app/professionista"
+'@ | Out-File -FilePath "windows\payload\Aura Desktop.bat" -Encoding ASCII
+          
+          Write-Host "✅ Payload Windows assemblato:"
+          Get-ChildItem "windows\payload" | Select-Object Name, Length
+
+      # ── 7. Aggiorna NSIS script con versione corretta ─────────
+      - name: Update NSIS script version
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $content = Get-Content "windows\aura-installer.nsi" -Raw
+          $content = $content -replace '!define PRODUCT_VERSION "[\d\.]+"', "!define PRODUCT_VERSION `"$version`""
+          $content | Out-File "windows\aura-installer.nsi" -Encoding UTF8 -NoNewline
+          Write-Host "✅ Versione aggiornata nel NSIS script: $version"
+
+      # ── 8. Build .exe con NSIS ────────────────────────────────
+      - name: Build .exe installer (NSIS)
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $nsisExe = "C:\Program Files (x86)\NSIS\makensis.exe"
+          
+          Push-Location windows
+          
+          # Copia payload nella directory corrente per NSIS
+          Copy-Item "payload\*" -Destination "." -Recurse -Force
+          
+          & $nsisExe /V3 `
+            /DOUTPUT_DIR=".." `
+            "aura-installer.nsi"
+          
+          Pop-Location
+          
+          $outputFile = "Aura-Desktop-Installer-v${version}.exe"
+          if (Test-Path $outputFile) {
+              Write-Host "✅ .exe creato: $outputFile"
+              Get-Item $outputFile | Select-Object Name, Length
+          } else {
+              # NSIS scrive nella directory windows/ — cerca lì
+              $found = Get-ChildItem -Recurse -Filter "*.exe" | Where-Object { $_.Name -like "*Installer*" }
+              if ($found) {
+                  Copy-Item $found.FullName -Destination $outputFile
+                  Write-Host "✅ .exe trovato e copiato: $($found.FullName)"
+              } else {
+                  Write-Error "❌ .exe non trovato dopo build NSIS"
+              }
+          }
+
+      # ── 9. Build .msi con WiX ─────────────────────────────────
+      - name: Install WiX Toolset
+        shell: pwsh
+        run: |
+          # WiX 4 via dotnet tool
+          dotnet tool install --global wix
+          wix --version
+
+      - name: Create WiX source
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $wixContent = @"
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="AURA Desktop" 
+           Version="$version.0" 
+           Manufacturer="Dottori-Online"
+           Language="1040"
+           Codepage="1252"
+           UpgradeCode="A8F7B3C2-1D4E-4A5F-8B9C-2E3F4A5B6C7D">
+    
+    <MajorUpgrade DowngradeErrorMessage="Una versione più recente di AURA Desktop è già installata."/>
+    
+    <MediaTemplate EmbedCab="yes"/>
+    
+    <Feature Id="MainFeature" Title="AURA Desktop" Level="1">
+      <ComponentGroupRef Id="ProductComponents"/>
+    </Feature>
+    
+    <UIRef Id="WixUI_Minimal"/>
+    
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER"/>
+    
+    <!-- Post-install: configura OLLAMA_ORIGINS -->
+    <Property Id="OLLAMA_ORIGINS" Value="*"/>
+    
+    <CustomAction Id="SetOllamaOrigins_User"
+                  Property="OLLAMA_ORIGINS"
+                  Value="*"
+                  Execute="immediate"/>
+    
+    <CustomAction Id="RunOllamaSetup"
+                  FileRef="SetupScript"
+                  ExeCommand='-ExecutionPolicy Bypass -WindowStyle Hidden -File "[INSTALLFOLDER]setup-ollama.ps1" -Silent'
+                  Execute="deferred"
+                  Impersonate="yes"
+                  Return="ignore"/>
+    
+    <InstallExecuteSequence>
+      <Custom Action="RunOllamaSetup" After="InstallFinalize">NOT Installed</Custom>
+    </InstallExecuteSequence>
+    
+  </Package>
+  
+  <Fragment>
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="LocalAppDataFolder">
+        <Directory Id="ProgramsFolder" Name="Programs">
+          <Directory Id="INSTALLFOLDER" Name="AuraDesktop"/>
+        </Directory>
+      </Directory>
+    </Directory>
+  </Fragment>
+  
+  <Fragment>
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+      
+      <Component Id="OllamaExe" Guid="B1C2D3E4-F5A6-7B8C-9D0E-1F2A3B4C5D6E">
+        <File Id="OllamaFile" 
+              Source="windows\payload\ollama.exe" 
+              KeyPath="yes"/>
+        <!-- Imposta OLLAMA_ORIGINS come variabile sistema -->
+        <Environment Id="OLLAMA_ORIGINS_SYS"
+                     Name="OLLAMA_ORIGINS"
+                     Value="*"
+                     Permanent="no"
+                     Part="all"
+                     Action="set"
+                     System="yes"/>
+        <!-- Imposta OLLAMA_ORIGINS anche per utente corrente -->
+        <Environment Id="OLLAMA_ORIGINS_USR"
+                     Name="OLLAMA_ORIGINS"
+                     Value="*"
+                     Permanent="no"
+                     Part="all"
+                     Action="set"
+                     System="no"/>
+      </Component>
+      
+      <Component Id="SetupScript" Guid="C2D3E4F5-A6B7-8C9D-0E1F-2A3B4C5D6E7F">
+        <File Id="SetupScript"
+              Source="windows\setup-ollama.ps1"
+              KeyPath="yes"/>
+      </Component>
+      
+      <Component Id="LauncherBat" Guid="D3E4F5A6-B7C8-9D0E-1F2A-3B4C5D6E7F8A">
+        <File Id="LauncherFile"
+              Source="windows\payload\Aura Desktop.bat"
+              KeyPath="yes"/>
+        <Shortcut Id="DesktopShortcut"
+                  Directory="DesktopFolder"
+                  Name="AURA Desktop"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Advertise="no"/>
+        <Shortcut Id="StartMenuShortcut"
+                  Directory="ProgramMenuFolder"
+                  Name="AURA Desktop"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Advertise="no"/>
+      </Component>
+      
+    </ComponentGroup>
+  </Fragment>
+  
+</Wix>
+"@
+          $wixContent | Out-File -FilePath "windows\aura-installer.wxs" -Encoding UTF8
+          Write-Host "✅ WiX source creato"
+
+      - name: Build .msi (WiX)
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          
+          Push-Location windows
+          
+          wix build aura-installer.wxs `
+            -ext WixToolset.UI.wixext `
+            -o "..\Aura.Desktop_${version}_x64_en-US.msi"
+          
+          Pop-Location
+          
+          $msiFile = "Aura.Desktop_${version}_x64_en-US.msi"
+          if (Test-Path $msiFile) {
+              Write-Host "✅ .msi creato: $msiFile"
+              Get-Item $msiFile | Select-Object Name, Length
+          } else {
+              Write-Warning "⚠️  .msi non trovato — build WiX potrebbe richiedere aggiustamenti"
+          }
+
+      # ── 10. Upload artifacts ──────────────────────────────────
+      - name: Upload .exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aura-desktop-windows-exe-${{ steps.version.outputs.version }}
+          path: Aura-Desktop-Installer-v${{ steps.version.outputs.version }}.exe
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload .msi artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aura-desktop-windows-msi-${{ steps.version.outputs.version }}
+          path: Aura.Desktop_${{ steps.version.outputs.version }}_x64_en-US.msi
+          retention-days: 30
+          if-no-files-found: warn
+
+      # ── 11. Aggiungi alla Release (se tag) ────────────────────
+      - name: Add Windows builds to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            Aura-Desktop-Installer-v${{ steps.version.outputs.version }}.exe
+            Aura.Desktop_${{ steps.version.outputs.version }}_x64_en-US.msi
+            windows/setup-ollama.ps1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

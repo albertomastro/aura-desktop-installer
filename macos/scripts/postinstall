@@ -1,0 +1,110 @@
+#!/bin/bash
+# ════════════════════════════════════════════════════════════════
+# AURA Desktop — postinstall script per .pkg
+# Gira come root — deve operare sull'utente reale della console
+# ════════════════════════════════════════════════════════════════
+set -euo pipefail
+
+# ── Rileva utente reale (non root) ──────────────────────────────
+CONSOLE_USER=$(stat -f "%Su" /dev/console 2>/dev/null || echo "")
+
+# Fallback: utente del processo padre (Installer.app)
+if [ -z "$CONSOLE_USER" ] || [ "$CONSOLE_USER" = "root" ] || [ "$CONSOLE_USER" = "loginwindow" ]; then
+    CONSOLE_USER=$(ps aux | grep -i "[Ii]nstaller" | grep -v grep | awk '{print $1}' | head -1)
+fi
+
+# Fallback finale: primo utente umano (UID >= 500)
+if [ -z "$CONSOLE_USER" ] || [ "$CONSOLE_USER" = "root" ]; then
+    CONSOLE_USER=$(dscl . -list /Users UniqueID | awk '$2 >= 500 {print $1}' | head -1)
+fi
+
+if [ -z "$CONSOLE_USER" ] || [ "$CONSOLE_USER" = "root" ]; then
+    echo "AURA postinstall: impossibile rilevare utente console. Esegui setup-aura-ollama.sh manualmente."
+    exit 0
+fi
+
+# ── Percorsi utente ─────────────────────────────────────────────
+USER_HOME=$(dscl . -read /Users/$CONSOLE_USER NFSHomeDirectory 2>/dev/null | awk '{print $2}')
+USER_UID=$(id -u "$CONSOLE_USER" 2>/dev/null || dscl . -read /Users/$CONSOLE_USER UniqueID | awk '{print $2}')
+
+if [ -z "$USER_HOME" ] || [ ! -d "$USER_HOME" ]; then
+    echo "AURA postinstall: home utente non trovata per $CONSOLE_USER"
+    exit 0
+fi
+
+PLIST_TEMPLATE="/Applications/Aura.app/Contents/Resources/ollama-bundle/com.aura.ollama-serve.plist"
+PLIST_DST="$USER_HOME/Library/LaunchAgents/com.aura.ollama-serve.plist"
+LOG_FILE="/tmp/aura-postinstall.log"
+
+echo "AURA postinstall: utente=$CONSOLE_USER uid=$USER_UID home=$USER_HOME" | tee "$LOG_FILE"
+
+# ── Crea directory LaunchAgents se non esiste ───────────────────
+AGENTS_DIR="$USER_HOME/Library/LaunchAgents"
+if [ ! -d "$AGENTS_DIR" ]; then
+    mkdir -p "$AGENTS_DIR"
+    chown "$CONSOLE_USER" "$AGENTS_DIR"
+    chmod 700 "$AGENTS_DIR"
+fi
+
+# ── Copia e personalizza il plist ───────────────────────────────
+if [ -f "$PLIST_TEMPLATE" ]; then
+    # Sostituisce __USER_HOME__ con il path reale dell'utente
+    sed "s|__USER_HOME__|$USER_HOME|g" "$PLIST_TEMPLATE" > "$PLIST_DST"
+else
+    # Genera plist inline (fallback)
+    cat > "$PLIST_DST" << PLISTEOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+ "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.aura.ollama-serve</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Applications/Aura.app/Contents/Resources/ollama-bundle/ollama</string>
+        <string>serve</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>OLLAMA_ORIGINS</key>
+        <string>*</string>
+        <key>HOME</key>
+        <string>${USER_HOME}</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+    <key>StandardOutPath</key>
+    <string>/tmp/aura-ollama.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/aura-ollama.err</string>
+</dict>
+</plist>
+PLISTEOF
+fi
+
+# ── Imposta owner e permessi ────────────────────────────────────
+chown "$CONSOLE_USER" "$PLIST_DST"
+chmod 644 "$PLIST_DST"
+echo "AURA postinstall: plist installato in $PLIST_DST" | tee -a "$LOG_FILE"
+
+# ── Unload eventuale vecchio servizio ───────────────────────────
+launchctl bootout "gui/$USER_UID" com.aura.ollama-serve 2>/dev/null || true
+sleep 1
+
+# ── Carica il LaunchAgent come utente reale ─────────────────────
+# Usiamo launchctl asuser per operare nel contesto dell'utente reale
+if launchctl asuser "$USER_UID" launchctl bootstrap "gui/$USER_UID" "$PLIST_DST" 2>>"$LOG_FILE"; then
+    echo "AURA postinstall: LaunchAgent caricato con successo per $CONSOLE_USER" | tee -a "$LOG_FILE"
+else
+    # Fallback: bootstrap diretto (funziona se l'utente è già loggato)
+    launchctl bootstrap "gui/$USER_UID" "$PLIST_DST" 2>>"$LOG_FILE" || true
+    echo "AURA postinstall: bootstrap tentato (verifica log: $LOG_FILE)" | tee -a "$LOG_FILE"
+fi
+
+echo "AURA postinstall: completato" | tee -a "$LOG_FILE"
+exit 0

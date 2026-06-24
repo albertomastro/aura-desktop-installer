@@ -1,0 +1,14 @@
+.DS_Store
+*.bak
+payload/
+pkg-scripts/
+pkg-resources/
+ollama-binary
+ollama-windows/
+ollama-windows.zip
+*.pkg
+*.exe
+*.msi
+Distribution.xml
+windows/assets/
+windows/payload/
