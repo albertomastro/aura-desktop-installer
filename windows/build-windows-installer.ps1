@@ -186,46 +186,72 @@ if (Test-Path $outFile) {
     exit 1
 }
 
-# 6. Build MSI with WiX
+# 6. Build MSI with WiX (non-fatal — .exe is the primary artifact)
+Write-Host "--- WiX MSI Build (optional) ---"
+
+# Install WiX tool
+$wixInstalled = $false
 try {
-    Write-Host "Installing WiX Toolset..."
-    dotnet tool install --global wix --version 4.0.5 *>$null
+    $dotnetToolResult = dotnet tool install --global wix --version 4.0.5 2>&1
+    Write-Host $dotnetToolResult
+    $wixInstalled = $true
 } catch {
-    Write-Host "WiX Toolset install returned an error or is already installed: $_"
-}
-
-# Ensure global dotnet tools are in PATH
-$env:PATH += ";$env:USERPROFILE\.dotnet\tools"
-
-$wixExe = Get-Command wix -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
-if (-not $wixExe) {
-    $wixExe = "$env:USERPROFILE\.dotnet\tools\wix.exe"
-}
-
-if (Test-Path $wixExe) {
-    Write-Host "WiX executable found at: $wixExe"
     try {
-        & $wixExe --version
-        
-        Write-Host "Updating version in windows\aura-installer.wxs..."
-        $wxsFile = "windows\aura-installer.wxs"
-        $wxs = Get-Content $wxsFile -Raw
-        $wxs = $wxs -replace 'Version="1\.0\.7\.0"', "Version=`"$Version.0`""
-        Set-Content $wxsFile $wxs
-        
-        Write-Host "Building MSI with WiX..."
-        $msiFile = "Aura.Desktop_${Version}_x64_en-US.msi"
-        & $wixExe build $wxsFile -bindpath payload -ext WixToolset.UI.wixext -o $msiFile
-        
-        if (Test-Path $msiFile) {
-            Write-Host "SUCCESS: $msiFile created successfully!"
-            Get-Item $msiFile | Select-Object Name, @{N='Size';E={[math]::Round($_.Length/1MB,1)}}
-        } else {
-            Write-Warning "WARNING: MSI was not created."
-        }
+        # Already installed - update it
+        dotnet tool update --global wix 2>&1 | Write-Host
+        $wixInstalled = $true
     } catch {
-        Write-Warning "Failed to build MSI: $_"
+        Write-Host "Could not install/update WiX: $_"
+    }
+}
+
+if ($wixInstalled) {
+    # Ensure global dotnet tools are in PATH
+    $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
+    
+    $wixExe = "$env:USERPROFILE\.dotnet\tools\wix.exe"
+    
+    if (Test-Path $wixExe) {
+        Write-Host "WiX found at: $wixExe"
+        
+        # Install required WiX extension
+        try {
+            Write-Host "Installing WixToolset.UI.wixext..."
+            & $wixExe extension add WixToolset.UI.wixext --global 2>&1 | Write-Host
+        } catch {
+            Write-Host "Extension install note: $_"
+        }
+        
+        try {
+            & $wixExe --version
+            
+            Write-Host "Updating version in windows\aura-installer.wxs..."
+            $wxsFile = "windows\aura-installer.wxs"
+            $wxs = Get-Content $wxsFile -Raw
+            $wxs = $wxs -replace 'Version="[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"', "Version=`"$Version.0`""
+            Set-Content $wxsFile $wxs
+            
+            Write-Host "Building MSI with WiX..."
+            $msiFile = "Aura.Desktop_${Version}_x64_en-US.msi"
+            
+            # Run wix build - use $LASTEXITCODE instead of exceptions
+            & $wixExe build $wxsFile -bindpath payload -ext WixToolset.UI.wixext -o $msiFile 2>&1 | Write-Host
+            
+            if ((Test-Path $msiFile) -and ((Get-Item $msiFile).Length -gt 0)) {
+                Write-Host "SUCCESS: $msiFile created!"
+                Get-Item $msiFile | Select-Object Name, @{N='Size';E={[math]::Round($_.Length/1MB,1)}}
+            } else {
+                Write-Host "MSI not created — continuing without it (EXE is the primary artifact)"
+            }
+        } catch {
+            Write-Host "WiX build skipped: $_"
+        }
+    } else {
+        Write-Host "wix.exe not found at expected path. Skipping MSI."
     }
 } else {
-    Write-Warning "wix.exe not found. Skipping MSI build."
+    Write-Host "WiX not installed. Skipping MSI build."
 }
+
+Write-Host "Build script completed successfully."
+exit 0
