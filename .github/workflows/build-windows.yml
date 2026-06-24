@@ -1,266 +1,44 @@
 name: Build Windows Installer
-
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       version:
-        description: 'Versione installer es 1.0.8'
+        description: 'Version'
         required: true
         default: '1.0.7'
-
 jobs:
   build-windows:
-    name: Build exe and msi Windows
     runs-on: windows-latest
-
     permissions:
       contents: write
-
-    env:
-      VERSION: ${{ github.event.inputs.version || '1.0.7' }}
-      OLLAMA_VERSION: '0.3.10'
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
       - name: Read version
-        id: version
+        id: ver
         shell: bash
-        run: |
-          if [ -f "shared/VERSION" ]; then
-            VER=$(cat shared/VERSION | tr -d '[:space:]')
-          else
-            VER="${VERSION}"
-          fi
-          echo "version=$VER" >> $GITHUB_OUTPUT
-          echo "Building version: $VER"
-
-      - name: Download ollama binary for Windows
+        run: echo "version=$(cat shared/VERSION | tr -d '[:space:]')" >> $GITHUB_OUTPUT
+      - name: Build installers
         shell: pwsh
-        run: |
-          $url = "https://github.com/ollama/ollama/releases/download/v${{ env.OLLAMA_VERSION }}/ollama-windows-amd64.zip"
-          Write-Host "Downloading Ollama for Windows..."
-          Invoke-WebRequest -Uri $url -OutFile "ollama-windows.zip" -UseBasicParsing
-          Expand-Archive -Path "ollama-windows.zip" -DestinationPath "ollama-extracted" -Force
-          Write-Host "Ollama extracted:"
-          Get-ChildItem "ollama-extracted" | Select-Object Name, Length
-
-      - name: Prepare payload directory
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path "payload"
-          
-          # Copy ollama binary
-          $ollamaExe = Get-ChildItem "ollama-extracted" -Recurse -Filter "ollama.exe" | Select-Object -First 1
-          if ($ollamaExe) {
-            Copy-Item $ollamaExe.FullName -Destination "payload\ollama.exe"
-          } else {
-            Copy-Item "ollama-extracted\ollama.exe" -Destination "payload\ollama.exe" -ErrorAction SilentlyContinue
-          }
-          
-          # Copy setup PowerShell script
-          Copy-Item "windows\setup-ollama.ps1" -Destination "payload\setup-ollama.ps1"
-          
-          # Create launcher batch file
-          $batContent = "@echo off`r`nstart """" ""https://dottori-online.com/app/professionista"""
-          [System.IO.File]::WriteAllText("payload\AuraDesktop.bat", $batContent)
-          
-          Write-Host "Payload contents:"
-          Get-ChildItem "payload" | Select-Object Name, Length
-
-      - name: Create NSIS assets
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path "nsis-assets"
-          
-          $license = "AURA Desktop - Termini di Utilizzo`r`nDottori-Online - https://dottori-online.com`r`n`r`nSoftware per uso professionale medico.`r`nOllama distribuito sotto licenza MIT."
-          [System.IO.File]::WriteAllText("nsis-assets\LICENSE.txt", $license)
-          
-          Write-Host "NSIS assets ready"
-
-      - name: Install NSIS
-        shell: pwsh
-        run: |
-          $nsisPath = "C:\Program Files (x86)\NSIS\makensis.exe"
-          if (-not (Test-Path $nsisPath)) {
-            choco install nsis -y --no-progress
-          }
-          & $nsisPath /VERSION
-
-      - name: Write NSIS script
-        shell: pwsh
-        run: |
-          $version = "${{ steps.version.outputs.version }}"
-          $nsi = @'
-!define PRODUCT_NAME "AURA Desktop"
-!define PRODUCT_VERSION "VERSIONPLACEHOLDER"
-!define PRODUCT_PUBLISHER "Dottori-Online"
-!define PRODUCT_URL "https://dottori-online.com"
-
-SetCompressor /SOLID lzma
-Name "${PRODUCT_NAME} ${PRODUCT_VERSION}"
-OutFile "Aura-Desktop-Installer-v${PRODUCT_VERSION}.exe"
-InstallDir "$LOCALAPPDATA\Programs\AuraDesktop"
-RequestExecutionLevel admin
-
-!include "MUI2.nsh"
-
-!define MUI_ABORTWARNING
-!define MUI_WELCOMEPAGE_TITLE "Benvenuto in AURA Desktop"
-!define MUI_WELCOMEPAGE_TEXT "Installa AURA Desktop con AI locale Ollama.$\r$\n$\r$\nConfigura automaticamente OLLAMA_ORIGINS per la dashboard medica.$\r$\n$\r$\nClicca Avanti per continuare."
-
-!insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_LICENSE "nsis-assets\LICENSE.txt"
-!insertmacro MUI_PAGE_DIRECTORY
-!insertmacro MUI_PAGE_INSTFILES
-!define MUI_FINISHPAGE_RUN "$INSTDIR\AuraDesktop.bat"
-!define MUI_FINISHPAGE_RUN_TEXT "Avvia AURA Desktop"
-!insertmacro MUI_PAGE_FINISH
-
-!insertmacro MUI_UNPAGE_CONFIRM
-!insertmacro MUI_UNPAGE_INSTFILES
-
-!insertmacro MUI_LANGUAGE "Italian"
-
-Section "AURA Desktop" SecMain
-  SectionIn RO
-  SetOutPath "$INSTDIR"
-  File "payload\ollama.exe"
-  File "payload\setup-ollama.ps1"
-  File "payload\AuraDesktop.bat"
-
-  WriteRegStr HKCU "Software\${PRODUCT_NAME}" "InstallDir" "$INSTDIR"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "DisplayName" "${PRODUCT_NAME} ${PRODUCT_VERSION}"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "UninstallString" "$INSTDIR\uninstall.exe"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "DisplayVersion" "${PRODUCT_VERSION}"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "Publisher" "${PRODUCT_PUBLISHER}"
-
-  CreateShortCut "$DESKTOP\AURA Desktop.lnk" "$INSTDIR\AuraDesktop.bat"
-  CreateDirectory "$SMPROGRAMS\${PRODUCT_NAME}"
-  CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\AURA Desktop.lnk" "$INSTDIR\AuraDesktop.bat"
-  CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\Disinstalla.lnk" "$INSTDIR\uninstall.exe"
-
-  WriteUninstaller "$INSTDIR\uninstall.exe"
-SectionEnd
-
-Section "Configura AI Locale" SecOllama
-  WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "OLLAMA_ORIGINS" "*"
-  WriteRegExpandStr HKCU "Environment" "OLLAMA_ORIGINS" "*"
-  DetailPrint "OLLAMA_ORIGINS=* configurato"
-  nsExec::ExecToLog 'powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File "$INSTDIR\setup-ollama.ps1" -Silent'
-  DetailPrint "Setup AI completato"
-SectionEnd
-
-Section "Uninstall"
-  nsExec::ExecToLog 'powershell.exe -ExecutionPolicy Bypass -Command "Stop-Process -Name ollama -Force -ErrorAction SilentlyContinue"'
-  DeleteRegValue HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "OLLAMA_ORIGINS"
-  DeleteRegValue HKCU "Environment" "OLLAMA_ORIGINS"
-  RMDir /r "$INSTDIR"
-  Delete "$DESKTOP\AURA Desktop.lnk"
-  RMDir /r "$SMPROGRAMS\${PRODUCT_NAME}"
-  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}"
-  DeleteRegKey HKCU "Software\${PRODUCT_NAME}"
-SectionEnd
-'@
-          $nsi = $nsi -replace 'VERSIONPLACEHOLDER', $version
-          [System.IO.File]::WriteAllText("aura-installer.nsi", $nsi)
-          Write-Host "NSIS script written for version $version"
-
-      - name: Build exe with NSIS
-        shell: pwsh
-        run: |
-          $version = "${{ steps.version.outputs.version }}"
-          $nsisExe = "C:\Program Files (x86)\NSIS\makensis.exe"
-          & $nsisExe /V3 "aura-installer.nsi"
-          $outFile = "Aura-Desktop-Installer-v${version}.exe"
-          if (Test-Path $outFile) {
-            Write-Host "SUCCESS: $outFile created"
-            Get-Item $outFile | Select-Object Name, @{N='Size';E={[math]::Round($_.Length/1MB,1)}}
-          } else {
-            Write-Error "ERROR: $outFile not found after NSIS build"
-            exit 1
-          }
-
-      - name: Install WiX Toolset
-        shell: pwsh
-        run: |
-          dotnet tool install --global wix --version 4.0.5 2>&1
-          wix --version
-
-      - name: Build msi with WiX
-        shell: pwsh
-        run: |
-          $version = "${{ steps.version.outputs.version }}"
-          
-          # Update version in wxs file
-          $wxs = Get-Content "windows\aura-installer.wxs" -Raw
-          $wxs = $wxs -replace 'Version="1\.0\.7\.0"', "Version=`"$version.0`""
-          Set-Content "windows\aura-installer.wxs" $wxs
-          
-          # Build MSI
-          wix build "windows\aura-installer.wxs" `
-            -bindpath payload `
-            -ext WixToolset.UI.wixext `
-            -o "Aura.Desktop_${version}_x64_en-US.msi" 2>&1
-          
-          $msiFile = "Aura.Desktop_${version}_x64_en-US.msi"
-          if (Test-Path $msiFile) {
-            Write-Host "SUCCESS: $msiFile created"
-            Get-Item $msiFile | Select-Object Name, @{N='Size';E={[math]::Round($_.Length/1MB,1)}}
-          } else {
-            Write-Warning "WARNING: MSI not created (WiX build may have issues - continuing)"
-          }
-
-      - name: Upload exe artifact
-        uses: actions/upload-artifact@v4
+        run: ./windows/build-windows-installer.ps1 -Version "${{ steps.ver.outputs.version }}"
+      - uses: actions/upload-artifact@v4
         with:
-          name: aura-desktop-windows-exe-${{ steps.version.outputs.version }}
-          path: Aura-Desktop-Installer-v${{ steps.version.outputs.version }}.exe
-          retention-days: 30
-
-      - name: Upload msi artifact
-        uses: actions/upload-artifact@v4
+          name: windows-exe-${{ steps.ver.outputs.version }}
+          path: "Aura-Desktop-Installer-v*.exe"
+      - uses: actions/upload-artifact@v4
         with:
-          name: aura-desktop-windows-msi-${{ steps.version.outputs.version }}
-          path: Aura.Desktop_${{ steps.version.outputs.version }}_x64_en-US.msi
-          retention-days: 30
+          name: windows-msi-${{ steps.ver.outputs.version }}
+          path: "Aura.Desktop_*_x64_en-US.msi"
           if-no-files-found: warn
-
-      - name: Create or Update GitHub Release
+      - name: GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          name: AURA Desktop v${{ steps.version.outputs.version }}
-          body: |
-            ## AURA Desktop v${{ steps.version.outputs.version }}
-
-            ### Download
-            | File | Piattaforma | Descrizione |
-            |------|------------|-------------|
-            | `.pkg` | macOS | 1-click installer — LaunchAgent automatico con CORS fix |
-            | `.exe` | Windows | NSIS installer con OLLAMA_ORIGINS=* integrato |
-            | `.msi` | Windows | MSI enterprise installer |
-
-            ### Fix CORS incluso
-            Configura automaticamente `OLLAMA_ORIGINS=*` per la dashboard AURA.
-
-            ### Note installazione macOS
-            Il file non e firmato Apple Developer ID. Se Gatekeeper blocca:
-            Impostazioni di Sistema → Privacy e Sicurezza → "Apri comunque"
-
-            ### Modelli AI
-            ```
-            ollama pull qwen2.5:1.5b
-            ollama pull llama3:latest
-            ```
-          files: |
-            Aura-Desktop-Installer-v${{ steps.version.outputs.version }}.exe
-            Aura.Desktop_${{ steps.version.outputs.version }}_x64_en-US.msi
-            windows/setup-ollama.ps1
           fail_on_unmatched_files: false
+          files: |
+            Aura-Desktop-Installer-v*.exe
+            Aura.Desktop_*_x64_en-US.msi
+            windows/setup-ollama.ps1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
