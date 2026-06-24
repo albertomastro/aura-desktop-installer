@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="AURA Desktop"
+           Version="1.0.7.0"
+           Manufacturer="Dottori-Online"
+           Language="1040"
+           Codepage="1252"
+           UpgradeCode="A8F7B3C2-1D4E-4A5F-8B9C-2E3F4A5B6C7D">
+
+    <MajorUpgrade DowngradeErrorMessage="Una versione piu recente di AURA Desktop e gia installata."/>
+    <MediaTemplate EmbedCab="yes"/>
+
+    <Feature Id="MainFeature" Title="AURA Desktop" Level="1">
+      <ComponentGroupRef Id="ProductComponents"/>
+    </Feature>
+
+    <UIRef Id="WixUI_Minimal"/>
+
+  </Package>
+
+  <Fragment>
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="LocalAppDataFolder">
+        <Directory Id="ProgramsFolder" Name="Programs">
+          <Directory Id="INSTALLFOLDER" Name="AuraDesktop"/>
+        </Directory>
+      </Directory>
+      <Directory Id="DesktopFolder" Name="Desktop"/>
+      <Directory Id="ProgramMenuFolder" Name="Programs"/>
+    </Directory>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+
+      <Component Id="OllamaExe" Guid="B1C2D3E4-F5A6-7B8C-9D0E-1F2A3B4C5D6E">
+        <File Id="OllamaFile"
+              Source="!(bindpath.payload)ollama.exe"
+              KeyPath="yes"/>
+        <Environment Id="OLLAMA_ORIGINS_SYS"
+                     Name="OLLAMA_ORIGINS"
+                     Value="*"
+                     Permanent="no"
+                     Part="all"
+                     Action="set"
+                     System="yes"/>
+        <Environment Id="OLLAMA_ORIGINS_USR"
+                     Name="OLLAMA_ORIGINS"
+                     Value="*"
+                     Permanent="no"
+                     Part="all"
+                     Action="set"
+                     System="no"/>
+      </Component>
+
+      <Component Id="SetupScript" Guid="C2D3E4F5-A6B7-8C9D-0E1F-2A3B4C5D6E7F">
+        <File Id="SetupScriptFile"
+              Source="!(bindpath.payload)setup-ollama.ps1"
+              KeyPath="yes"/>
+      </Component>
+
+      <Component Id="LauncherBat" Guid="D3E4F5A6-B7C8-9D0E-1F2A-3B4C5D6E7F8A">
+        <File Id="LauncherFile"
+              Source="!(bindpath.payload)AuraDesktop.bat"
+              KeyPath="yes"/>
+        <Shortcut Id="DesktopShortcut"
+                  Directory="DesktopFolder"
+                  Name="AURA Desktop"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Advertise="no"/>
+        <Shortcut Id="StartMenuShortcut"
+                  Directory="ProgramMenuFolder"
+                  Name="AURA Desktop"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Advertise="no"/>
+      </Component>
+
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>
