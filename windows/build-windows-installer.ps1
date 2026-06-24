@@ -7,10 +7,40 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "Starting build for Version: $Version, Ollama Version: $OllamaVersion"
 
+# Function to download large files robustly
+function Download-File {
+    param(
+        [string]$Url,
+        [string]$OutFile
+    )
+    
+    $ProgressPreference = 'SilentlyContinue'
+    
+    # Try using curl.exe first (faster and handles large files better on Windows runner)
+    try {
+        Write-Host "Attempting download with curl.exe..."
+        curl.exe -L -s -S -o $OutFile $Url
+        if ((Test-Path $OutFile) -and ((Get-Item $OutFile).Length -gt 100MB)) {
+            Write-Host "Download successful via curl.exe"
+            return
+        }
+    } catch {
+        Write-Host "curl.exe download failed or file too small: $_"
+    }
+    
+    # Fallback to Invoke-WebRequest
+    Write-Host "Attempting download with Invoke-WebRequest..."
+    Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing
+    
+    if (-not (Test-Path $OutFile) -or ((Get-Item $OutFile).Length -le 100MB)) {
+        throw "Download failed or downloaded file is too small (less than 100MB)"
+    }
+}
+
 # 1. Download ollama binary for Windows
 $url = "https://github.com/ollama/ollama/releases/download/v${OllamaVersion}/ollama-windows-amd64.zip"
 Write-Host "Downloading Ollama for Windows from $url..."
-Invoke-WebRequest -Uri $url -OutFile "ollama-windows.zip" -UseBasicParsing
+Download-File -Url $url -OutFile "ollama-windows.zip"
 
 Write-Host "Extracting Ollama..."
 if (Test-Path "ollama-extracted") {
