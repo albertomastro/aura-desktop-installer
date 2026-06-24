@@ -160,7 +160,7 @@ jobs:
         run: |
           mkdir -p pkg-resources
           
-          cat > pkg-resources/welcome.html << 'EOF'
+          cat > pkg-resources/welcome.html << EOF
           <!DOCTYPE html><html><head><meta charset="UTF-8">
           <style>body{font-family:-apple-system,sans-serif;padding:20px;color:#1a1a1a}
           h1{color:#0F5665}p{line-height:1.6}ul{padding-left:20px}
@@ -174,7 +174,7 @@ jobs:
             <li>⚡ Avvio automatico con il tuo Mac</li>
             <li>✅ CORS configurato per la dashboard medica</li>
           </ul>
-          <p><span class="badge">v__VERSION__</span></p>
+          <p><span class="badge">v${VERSION}</span></p>
           </body></html>
           EOF
           
@@ -185,7 +185,8 @@ jobs:
           <h2>Termini di Utilizzo — AURA Desktop</h2>
           <p>Software sviluppato da Dottori-Online per uso professionale medico.</p>
           <p>Distribuito per uso interno. Ollama è distribuito sotto licenza MIT.</p>
-          <p>Per supporto: <a href="https://dottori-online.com">dottori-online.com</a></p>
+          <p>Per supporto: <a href="mailto:supporto@dottori-online.com">supporto@dottori-online.com</a></p>
+          <p><a href="https://dottori-online.com">dottori-online.com</a></p>
           </body></html>
           EOF
           
