@@ -75,6 +75,9 @@ jobs:
              payload/Applications/Aura.app/Contents/Resources/ollama-bundle/
           chmod +x payload/Applications/Aura.app/Contents/Resources/ollama-bundle/setup-aura-ollama.sh
           
+          # Copia icona dell'applicazione
+          cp macos/resources/icon.icns payload/Applications/Aura.app/Contents/Resources/
+          
           # Copia Info.plist dell'app (minimale — l'installer non include il binario WKWebView)
           mkdir -p payload/Applications/Aura.app/Contents/MacOS
           cat > payload/Applications/Aura.app/Contents/Info.plist << 'EOF'
@@ -90,6 +93,8 @@ jobs:
               <string>VERSION_PLACEHOLDER</string>
               <key>CFBundleExecutable</key>
               <string>Aura</string>
+              <key>CFBundleIconFile</key>
+              <string>icon.icns</string>
           </dict>
           </plist>
           EOF
