@@ -7,13 +7,15 @@
     <string>com.aura.ollama-serve</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Applications/Aura Desktop.app/Contents/Resources/ollama-bundle/ollama</string>
+        <string>__AURA_APP__/Contents/Resources/ollama-bundle/ollama</string>
         <string>serve</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>
         <key>OLLAMA_ORIGINS</key>
         <string>*</string>
+        <key>OLLAMA_HOST</key>
+        <string>127.0.0.1:11435</string>
         <key>HOME</key>
         <string>__USER_HOME__</string>
     </dict>

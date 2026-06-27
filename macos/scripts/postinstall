@@ -32,7 +32,12 @@ if [ -z "$USER_HOME" ] || [ ! -d "$USER_HOME" ]; then
     exit 0
 fi
 
-PLIST_TEMPLATE="/Applications/Aura Desktop.app/Contents/Resources/ollama-bundle/com.aura.ollama-serve.plist"
+if [ -d "/Applications/Aura Desktop.app" ]; then
+    AURA_APP="/Applications/Aura Desktop.app"
+else
+    AURA_APP="/Applications/Aura.app"
+fi
+PLIST_TEMPLATE="$AURA_APP/Contents/Resources/ollama-bundle/com.aura.ollama-serve.plist"
 PLIST_DST="$USER_HOME/Library/LaunchAgents/com.aura.ollama-serve.plist"
 LOG_FILE="/tmp/aura-postinstall.log"
 
@@ -48,8 +53,8 @@ fi
 
 # ── Copia e personalizza il plist ───────────────────────────────
 if [ -f "$PLIST_TEMPLATE" ]; then
-    # Sostituisce __USER_HOME__ con il path reale dell'utente
-    sed "s|__USER_HOME__|$USER_HOME|g" "$PLIST_TEMPLATE" > "$PLIST_DST"
+    # Sostituisce __USER_HOME__ e __AURA_APP__
+    sed -e "s|__USER_HOME__|$USER_HOME|g" -e "s|__AURA_APP__|$AURA_APP|g" "$PLIST_TEMPLATE" > "$PLIST_DST"
 else
     # Genera plist inline (fallback)
     cat > "$PLIST_DST" << PLISTEOF
@@ -62,13 +67,15 @@ else
     <string>com.aura.ollama-serve</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Applications/Aura Desktop.app/Contents/Resources/ollama-bundle/ollama</string>
+        <string>${AURA_APP}/Contents/Resources/ollama-bundle/ollama</string>
         <string>serve</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>
         <key>OLLAMA_ORIGINS</key>
         <string>*</string>
+        <key>OLLAMA_HOST</key>
+        <string>127.0.0.1:11435</string>
         <key>HOME</key>
         <string>${USER_HOME}</string>
     </dict>
