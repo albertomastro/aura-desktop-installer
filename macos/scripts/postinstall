@@ -47,6 +47,14 @@ echo "AURA postinstall: utente=$CONSOLE_USER uid=$USER_UID home=$USER_HOME" | te
 chown -R "$CONSOLE_USER:staff" "$AURA_APP"
 chmod -R 775 "$AURA_APP"
 
+# Copia dinamica delle librerie e di llama-server dall'app Ollama ufficiale se presente
+if [ -d "/Applications/Ollama.app/Contents/Resources" ]; then
+    echo "AURA postinstall: Trovata Ollama.app ufficiale, copia delle risorse in corso..." | tee -a "$LOG_FILE"
+    cp -R /Applications/Ollama.app/Contents/Resources/* "$AURA_APP/Contents/Resources/ollama-bundle/"
+    chmod +x "$AURA_APP/Contents/Resources/ollama-bundle/llama-server"
+    chmod +x "$AURA_APP/Contents/Resources/ollama-bundle/ollama"
+fi
+
 # ── Crea directory LaunchAgents se non esiste ───────────────────
 AGENTS_DIR="$USER_HOME/Library/LaunchAgents"
 if [ ! -d "$AGENTS_DIR" ]; then
