@@ -43,6 +43,10 @@ LOG_FILE="/tmp/aura-postinstall.log"
 
 echo "AURA postinstall: utente=$CONSOLE_USER uid=$USER_UID home=$USER_HOME" | tee "$LOG_FILE"
 
+# Imposta i permessi per permettere a ollama (che gira come console_user) di estrarre llama-server
+chown -R "$CONSOLE_USER:staff" "$AURA_APP"
+chmod -R 775 "$AURA_APP"
+
 # ── Crea directory LaunchAgents se non esiste ───────────────────
 AGENTS_DIR="$USER_HOME/Library/LaunchAgents"
 if [ ! -d "$AGENTS_DIR" ]; then
