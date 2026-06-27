@@ -7,7 +7,7 @@
     <string>com.aura.ollama-serve</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Applications/Aura.app/Contents/Resources/ollama-bundle/ollama</string>
+        <string>/Applications/Aura Desktop.app/Contents/Resources/ollama-bundle/ollama</string>
         <string>serve</string>
     </array>
     <key>EnvironmentVariables</key>

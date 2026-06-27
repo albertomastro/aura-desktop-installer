@@ -7,7 +7,7 @@
 # oppure è disponibile in /Applications/Aura.app/Contents/Resources/ollama-bundle/
 # ════════════════════════════════════════════════════════════════════════
 
-AURA_APP="/Applications/Aura.app"
+AURA_APP="/Applications/Aura Desktop.app"
 OLLAMA_BIN="$AURA_APP/Contents/Resources/ollama-bundle/ollama"
 PLIST_SRC="$AURA_APP/Contents/Resources/ollama-bundle/com.aura.ollama-serve.plist"
 PLIST_DST="$HOME/Library/LaunchAgents/com.aura.ollama-serve.plist"

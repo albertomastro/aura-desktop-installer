@@ -32,7 +32,7 @@ if [ -z "$USER_HOME" ] || [ ! -d "$USER_HOME" ]; then
     exit 0
 fi
 
-PLIST_TEMPLATE="/Applications/Aura.app/Contents/Resources/ollama-bundle/com.aura.ollama-serve.plist"
+PLIST_TEMPLATE="/Applications/Aura Desktop.app/Contents/Resources/ollama-bundle/com.aura.ollama-serve.plist"
 PLIST_DST="$USER_HOME/Library/LaunchAgents/com.aura.ollama-serve.plist"
 LOG_FILE="/tmp/aura-postinstall.log"
 
@@ -62,7 +62,7 @@ else
     <string>com.aura.ollama-serve</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Applications/Aura.app/Contents/Resources/ollama-bundle/ollama</string>
+        <string>/Applications/Aura Desktop.app/Contents/Resources/ollama-bundle/ollama</string>
         <string>serve</string>
     </array>
     <key>EnvironmentVariables</key>
