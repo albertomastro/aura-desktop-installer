@@ -88,11 +88,21 @@ jobs:
               <string>Aura Desktop</string>
               <key>CFBundleShortVersionString</key>
               <string>VERSION_PLACEHOLDER</string>
+              <key>CFBundleExecutable</key>
+              <string>Aura</string>
           </dict>
           </plist>
           EOF
           
           sed -i '' "s/VERSION_PLACEHOLDER/$VERSION/" payload/Applications/Aura.app/Contents/Info.plist
+          
+          # Crea eseguibile segnaposto per mostrare un messaggio amichevole ed evitare l'errore "danneggiata"
+          cat > payload/Applications/Aura.app/Contents/MacOS/Aura << 'EOF'
+#!/bin/bash
+osascript -e 'display dialog "Aura AI Local Engine è in esecuzione in background.\n\nNon è necessario avviare questa applicazione manualmente: i servizi di refertazione vocale sono attivi e pronti nell’Agenda Clinica di Dottori-Online." with title "Aura AI" buttons {"Chiudi"} default button "Chiudi" with icon note'
+exit 0
+EOF
+          chmod +x payload/Applications/Aura.app/Contents/MacOS/Aura
           
           echo "✅ Payload assemblato:"
           find payload -type f | sort
