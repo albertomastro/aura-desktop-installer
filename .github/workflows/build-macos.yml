@@ -48,11 +48,11 @@ jobs:
           echo "Scaricando ollama per macOS..."
           # Scarica versione universale (arm64 + amd64)
           curl -L --retry 3 --retry-delay 5 \
-            "https://github.com/ollama/ollama/releases/download/v${{ env.OLLAMA_VERSION }}/ollama-darwin" \
-            -o ollama-binary
-          chmod +x ollama-binary
-          echo "✅ Ollama scaricato: $(file ollama-binary)"
-          ls -lh ollama-binary
+            "https://github.com/ollama/ollama/releases/download/v${{ env.OLLAMA_VERSION }}/Ollama-darwin.zip" \
+            -o ollama-bundle.zip
+          unzip -q ollama-bundle.zip -d ollama-extracted
+          echo "✅ Ollama Bundle scaricato ed estratto"
+          ls -lh ollama-bundle.zip
 
       # ── 4. Assembla payload del pkg ─────────────────────────────
       - name: Assemble pkg payload
@@ -62,9 +62,10 @@ jobs:
           # Struttura: payload/Applications/Aura.app/Contents/Resources/ollama-bundle/
           mkdir -p payload/Applications/Aura.app/Contents/Resources/ollama-bundle
           
-          # Copia ollama binary
-          cp ollama-binary payload/Applications/Aura.app/Contents/Resources/ollama-bundle/ollama
+          # Copia ollama bundle
+          cp -R ollama-extracted/Ollama.app/Contents/Resources/* payload/Applications/Aura.app/Contents/Resources/ollama-bundle/
           chmod +x payload/Applications/Aura.app/Contents/Resources/ollama-bundle/ollama
+          chmod +x payload/Applications/Aura.app/Contents/Resources/ollama-bundle/llama-server
           
           # Copia plist LaunchAgent (template con __USER_HOME__ placeholder)
           cp macos/resources/com.aura.ollama-serve.plist \
